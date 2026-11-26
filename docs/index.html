@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Prueba de sincronía</title>
+<style>
+  :root {
+    --fondo: #f7f4ee; --tarjeta: #ffffff; --texto: #2b2a28; --suave: #77736c; --borde: #e4dfd5;
+    --papa: #1F3A68; --mama: #F3E3A3; --sofia: #F4D3D6; --familia: #8A8580;
+    --ok: #2e7d4f; --aviso: #b26a00; --error: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 17px/1.4 -apple-system, system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-family: Georgia, serif; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-family: Georgia, serif; font-size: 20px; margin: 0 0 10px; }
+  .estado { color: var(--suave); margin-bottom: 16px; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; padding: 16px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--borde); }
+  li:last-child { border-bottom: 0; }
+  .chip { flex: none; min-width: 64px; text-align: center; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 3px 8px; }
+  .p { background: var(--papa); color: #fff; } .m { background: var(--mama); color: #4a3d00; }
+  .s { background: var(--sofia); color: #5a1f27; } .f { background: #e9e6e1; color: #4a4741; }
+  .cuando { color: var(--suave); font-size: 14px; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--papa); color: #fff; min-height: 44px; }
+  button.sec { background: #e9e6e1; color: var(--texto); }
+  .marcar { width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 50%; border: 2px solid var(--borde); background: #fff; color: var(--ok); flex: none; }
+  .hecho { text-decoration: line-through; color: var(--suave); }
+  .barra { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+  input, select { font: inherit; padding: 10px; border: 1px solid var(--borde); border-radius: 10px; min-height: 44px; background: #fff; color: var(--texto); }
+  form { display: flex; flex-wrap: wrap; gap: 8px; }
+  form input[name=titulo] { flex: 1 1 180px; }
+  .vacio { color: var(--suave); font-style: italic; }
+  .aviso { color: var(--aviso); } .error { color: var(--error); } .bien { color: var(--ok); }
+  details { margin-top: 16px; }
+  pre { white-space: pre-wrap; font-size: 13px; background: #fff; border: 1px solid var(--borde); border-radius: 10px; padding: 10px; }
+  #config { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prueba de sincronía</h1>
+  <div class="estado" id="estado">Cargando…</div>
+
+  <div class="barra">
+    <button id="actualizar">Actualizar (abre el Atajo)</button>
+    <button class="sec" id="recargar">Volver a leer el buzón</button>
+    <button class="sec" id="abrirConfig">Ajustes</button>
+  </div>
+
+  <div class="tarjeta" id="config">
+    <h2>Ajustes de la prueba</h2>
+    <form id="formConfig">
+      <input name="worker" placeholder="https://panel-familiar.TU-NOMBRE.workers.dev" style="flex:1 1 320px" autocapitalize="off" autocorrect="off">
+      <input name="clave" placeholder="Clave de la familia" autocapitalize="off" autocorrect="off">
+      <button>Guardar</button>
+    </form>
+  </div>
+
+  <div class="rejilla" style="margin-top:16px">
+    <section class="tarjeta">
+      <h2>Calendario familiar · 14 días</h2>
+      <ul id="eventos"></ul>
+    </section>
+    <section class="tarjeta">
+      <h2>La Bicholista</h2>
+      <ul id="tareas"></ul>
+    </section>
+    <section class="tarjeta">
+      <h2>Compra</h2>
+      <ul id="compra"></ul>
+    </section>
+    <section class="tarjeta">
+      <h2>Añadir</h2>
+      <form id="formAnadir">
+        <input name="titulo" placeholder="Ej.: Leche, o M devolver chaqueta" required>
+        <select name="lista"><option>Compra</option><option>La Bicholista</option></select>
+        <button>Añadir</button>
+      </form>
+      <h2 style="margin-top:16px">Esperando al Atajo</h2>
+      <ul id="pendientes"></ul>
+    </section>
+  </div>
+
+  <details>
+    <summary>Lo que envió el Atajo, sin procesar</summary>
+    <pre id="bruto"></pre>
+  </details>
+</main>
+<script>
+(function () {
+  var NOMBRE_ATAJO = "Sincronizar panel";
+  var $ = function (id) { return document.getElementById(id); };
+
+  function guardar(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function cargar(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+
+  // Se puede abrir con #worker=...&clave=... para no escribir nada.
+  var h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("worker")) guardar("worker", h.get("worker").replace(/\/+$/, ""));
+  if (h.get("clave")) guardar("clave", h.get("clave"));
+
+  var cfg = { worker: cargar("worker"), clave: cargar("clave") };
+  var form = $("formConfig");
+  form.worker.value = cfg.worker; form.clave.value = cfg.clave;
+
+  function api(ruta, opciones) {
+    var url = cfg.worker + ruta + (ruta.indexOf("?") < 0 ? "?" : "&") + "clave=" + encodeURIComponent(cfg.clave);
+    return fetch(url, opciones).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) throw new Error(d.error || ("Error " + r.status));
+        return d;
+      });
+    });
+  }
+
+  // Dueño por prefijo: "P:", "M:", "S:" o "M devolver…" (letra + espacio). Sin prefijo = Familia.
+  function dueno(titulo) {
+    var m = /^([PMS])(?::\s*|\s+)(.+)$/i.exec(titulo || "");
+    if (!m) return { clase: "f", nombre: "Familia", texto: titulo };
+    var l = m[1].toUpperCase();
+    return { clase: l.toLowerCase(), nombre: { P: "Papá", M: "Mamá", S: "Sofía" }[l], texto: m[2] };
+  }
+
+  function fecha(s) {
+    if (!s) return "";
+    var d = new Date(s);
+    if (isNaN(d)) return s; // si el Atajo no mandó ISO 8601, se ve tal cual
+    return d.toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function hace(iso) {
+    var min = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (min < 1) return "hace un momento";
+    if (min < 60) return "hace " + min + " min";
+    var hh = Math.round(min / 60);
+    return hh < 24 ? "hace " + hh + " h" : "hace " + Math.round(hh / 24) + " días";
+  }
+
+  function li(html) { var e = document.createElement("li"); e.innerHTML = html; return e; }
+  function esc(s) { return String(s || "").replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function vacia(ul, texto) { ul.innerHTML = ""; ul.appendChild(li('<span class="vacio">' + texto + "</span>")); }
+
+  var datos = { foto: null, pendientes: [] };
+
+  function pintar() {
+    var f = datos.foto, p = datos.pendientes || [];
+    var porCompletar = p.filter(function (a) { return a.tipo === "completar"; }).map(function (a) { return a.titulo; });
+
+    var ev = $("eventos"); ev.innerHTML = "";
+    if (!f || !f.eventos.length) vacia(ev, f ? "Sin eventos en 14 días" : "Aún no ha llegado nada del Atajo");
+    else f.eventos.forEach(function (e) {
+      var d = dueno(e.titulo);
+      ev.appendChild(li('<span class="chip ' + d.clase + '">' + d.nombre + "</span><div>" + esc(d.texto) +
+        '<div class="cuando">' + esc(fecha(e.inicio)) + (e.lugar ? " · " + esc(e.lugar) : "") + "</div></div>"));
+    });
+
+    var ta = $("tareas"); ta.innerHTML = "";
+    if (!f || !f.tareas.length) vacia(ta, f ? "Nada pendiente" : "Aún no ha llegado nada del Atajo");
+    else f.tareas.forEach(function (t) {
+      var d = dueno(t.titulo), esperando = porCompletar.indexOf(t.titulo) >= 0;
+      var e = li('<button class="marcar" aria-label="Completar">' + (esperando ? "✓" : "") + '</button><span class="chip ' + d.clase + '">' + d.nombre +
+        '</span><div class="' + (esperando ? "hecho" : "") + '">' + esc(d.texto) + (t.vence ? '<div class="cuando">' + esc(fecha(t.vence)) + "</div>" : "") + "</div>");
+      if (!esperando) e.querySelector("button").onclick = function () { accion("completar", "La Bicholista", t.titulo); };
+      ta.appendChild(e);
+    });
+
+    var co = $("compra"); co.innerHTML = "";
+    if (!f || !f.compra.length) vacia(co, f ? "La lista está vacía" : "Aún no ha llegado nada del Atajo");
+    else f.compra.forEach(function (c) { co.appendChild(li(esc(c.titulo))); });
+
+    var pe = $("pendientes"); pe.innerHTML = "";
+    if (!p.length) vacia(pe, "Nada: todo está aplicado en Recordatorios");
+    else p.forEach(function (a) {
+      pe.appendChild(li('<span class="chip f">' + (a.tipo === "completar" ? "Completar" : "Añadir") + "</span><div>" + esc(a.titulo) +
+        '<div class="cuando">' + esc(a.lista) + " · " + hace(a.creada) + "</div></div>"));
+    });
+
+    $("bruto").textContent = f ? f.texto : "";
+    var est = $("estado");
+    if (!f) est.innerHTML = '<span class="aviso">Conectado al buzón. Falta la primera ejecución del Atajo.</span>';
+    else est.innerHTML = '<span class="bien">Última foto del Atajo ' + hace(f.recibida) + "</span> · " +
+      f.eventos.length + " eventos, " + f.tareas.length + " tareas, " + f.compra.length + " en la compra" +
+      (p.length ? ' · <span class="aviso">' + p.length + " cambios esperando al Atajo</span>" : "");
+  }
+
+  function leer() {
+    if (!cfg.worker || !cfg.clave) {
+      $("config").style.display = "block";
+      $("estado").innerHTML = '<span class="aviso">Escribe la dirección del Worker y la clave en Ajustes.</span>';
+      return;
+    }
+    api("/api/estado").then(function (d) { datos = d; pintar(); })
+      .catch(function (e) { $("estado").innerHTML = '<span class="error">No se pudo leer el buzón: ' + esc(e.message) + "</span>"; });
+  }
+
+  function accion(tipo, lista, titulo) {
+    api("/api/accion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tipo: tipo, lista: lista, titulo: titulo }) })
+      .then(leer)
+      .catch(function (e) { alert("No se pudo guardar: " + e.message); });
+  }
+
+  form.onsubmit = function (ev) {
+    ev.preventDefault();
+    cfg.worker = form.worker.value.trim().replace(/\/+$/, ""); cfg.clave = form.clave.value.trim();
+    guardar("worker", cfg.worker); guardar("clave", cfg.clave);
+    $("config").style.display = "none"; leer();
+  };
+  $("formAnadir").onsubmit = function (ev) {
+    ev.preventDefault();
+    var t = this.titulo.value.trim(); if (!t) return;
+    accion("anadir", this.lista.value, t); this.titulo.value = "";
+  };
+  $("abrirConfig").onclick = function () { var c = $("config"); c.style.display = c.style.display === "block" ? "none" : "block"; };
+  $("recargar").onclick = leer;
+  $("actualizar").onclick = function () {
+    var volver = location.href.split("#")[0];
+    location.href = "shortcuts://x-callback-url/run-shortcut?name=" + encodeURIComponent(NOMBRE_ATAJO) +
+      "&x-success=" + encodeURIComponent(volver) + "&x-cancel=" + encodeURIComponent(volver) + "&x-error=" + encodeURIComponent(volver);
+  };
+
+  leer();
+  setInterval(leer, 60000);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) leer(); });
+})();
+</script>
+</body>
+</html>
